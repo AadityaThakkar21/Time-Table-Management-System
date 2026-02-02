@@ -1,18 +1,36 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+export const generatedFiles = pgTable("generated_files", {
+  id: serial("id").primaryKey(),
+  originalFilename: text("original_filename").notNull(),
+  processedFilename: text("processed_filename").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+export const insertGeneratedFileSchema = createInsertSchema(generatedFiles).omit({ 
+  id: true, 
+  createdAt: true 
 });
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export type GeneratedFile = typeof generatedFiles.$inferSelect;
+export type InsertGeneratedFile = z.infer<typeof insertGeneratedFileSchema>;
+
+export const scheduleEntries = pgTable("schedule_entries", {
+  id: serial("id").primaryKey(),
+  fileId: integer("file_id").references(() => generatedFiles.id).notNull(),
+  facultyName: text("faculty_name").notNull(),
+  day: text("day").notNull(),
+  timeSlot: text("time_slot").notNull(),
+  subject: text("subject").notNull(),
+  room: text("room"),
+  batch: text("batch"),
+});
+
+export const insertScheduleEntrySchema = createInsertSchema(scheduleEntries).omit({ 
+  id: true 
+});
+
+export type ScheduleEntry = typeof scheduleEntries.$inferSelect;
+export type InsertScheduleEntry = z.infer<typeof insertScheduleEntrySchema>;
