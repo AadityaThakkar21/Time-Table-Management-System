@@ -1,6 +1,5 @@
 import sys
 import pandas as pd
-import sys
 import os
 
 def process_timetable(input_path, output_path):
@@ -8,55 +7,96 @@ def process_timetable(input_path, output_path):
         # Load the Excel file
         df = pd.read_excel(input_path)
         
-        # Identify columns - Assuming a standard format or trying to auto-detect "Faculty" column
-        # If specific columns are not found, we will try to group by the first column or look for keywords
+        # Column normalization
+        df.columns = [str(col).strip() for col in df.columns]
         
-        possible_faculty_cols = [col for col in df.columns if 'faculty' in str(col).lower() or 'teacher' in str(col).lower() or 'instructor' in str(col).lower()]
+        # Identify critical columns
+        faculty_col = next((col for col in df.columns if any(x in col.lower() for x in ['faculty', 'teacher', 'instructor', 'professor'])), df.columns[0])
+        duration_col = next((col for col in df.columns if any(x in col.lower() for x in ['duration', 'hours', 'time'])), None)
+        level_col = next((col for col in df.columns if any(x in col.lower() for x in ['level', 'ug/pg', 'program', 'degree'])), None)
         
-        if possible_faculty_cols:
-            faculty_col = possible_faculty_cols[0]
-        else:
-            # Fallback: assume the first column is the grouping criteria if no "Faculty" column found
-            faculty_col = df.columns[0]
-            
-        print(f"Grouping by column: {faculty_col}")
+        print(f"Academic Analysis: Faculty={faculty_col}, Level={level_col}")
 
-        # Create a Pandas Excel writer using XlsxWriter as the engine
+        # Summary statistics
+        summary_data = []
+
         with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-            # Get unique faculties
+            # Group by Faculty
             faculties = df[faculty_col].dropna().unique()
             
             for faculty in faculties:
-                # Filter data for this faculty
-                faculty_data = df[df[faculty_col] == faculty]
+                faculty_df = df[df[faculty_col] == faculty]
                 
-                # Clean the sheet name (Excel limits: 31 chars, no special chars)
-                sheet_name = str(faculty)[:30].replace(':', '').replace('/', '-').replace('\\', '-').replace('?', '').replace('*', '').replace('[', '').replace(']', '')
-                
-                if not sheet_name:
-                    sheet_name = "Unknown"
-                
-                # Write data to a sheet named after the faculty
-                faculty_data.to_excel(writer, sheet_name=sheet_name, index=False)
-                
-                # Auto-adjust column widths
-                worksheet = writer.sheets[sheet_name]
-                for i, col in enumerate(faculty_data.columns):
-                    column_len = max(faculty_data[col].astype(str).map(len).max(), len(str(col))) + 2
-                    worksheet.set_column(i, i, column_len)
+                # Calculate Academic Metrics
+                total_hours = 0
+                if duration_col:
+                    # Try to extract numbers if it's a string like "1.5 hours"
+                    total_hours = pd.to_numeric(faculty_df[duration_col].astype(str).str.extract('(\d+\.?\d*)')[0], errors='coerce').sum()
+                else:
+                    # Default: count sessions as 1 hour each if no duration provided
+                    total_hours = len(faculty_df)
 
-        print(f"Successfully generated {output_path}")
+                ug_count = 0
+                pg_count = 0
+                if level_col:
+                    ug_count = faculty_df[faculty_df[level_col].astype(str).str.upper().str.contains('UG')].shape[0]
+                    pg_count = faculty_df[faculty_df[level_col].astype(str).str.upper().str.contains('PG')].shape[0]
+
+                # Store for main summary sheet
+                summary_data.append({
+                    'Faculty Name': faculty,
+                    'Total Weekly Hours': total_hours,
+                    'UG Sessions': ug_count,
+                    'PG Sessions': pg_count,
+                    'Total Sessions': len(faculty_df)
+                })
+
+                # Create specific sheet
+                sheet_name = str(faculty)[:31].translate(str.maketrans('', '', ':/?*[]\\'))
+                if not sheet_name: sheet_name = "Unknown"
+                
+                # Add a "Faculty Profile" header to the sheet
+                header_df = pd.DataFrame([
+                    ['Faculty Member', faculty],
+                    ['Total Contact Hours', f"{total_hours} hrs/week"],
+                    ['Academic Level', 'Mixed' if ug_count > 0 and pg_count > 0 else ('UG' if ug_count > 0 else 'PG')],
+                    ['', ''] # Spacer
+                ])
+                header_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+                
+                # Write main data starting below header
+                faculty_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=5)
+                
+                # Formatting
+                workbook = writer.book
+                worksheet = writer.sheets[sheet_name]
+                
+                header_format = workbook.add_format({'bold': True, 'bg_color': '#D7E4BC', 'border': 1})
+                metric_format = workbook.add_format({'bold': True, 'font_color': '#215967'})
+                
+                # Apply formatting to header info
+                worksheet.write('A1', 'Faculty Profile', header_format)
+                worksheet.set_column('A:Z', 18)
+
+            # Create Global Summary Sheet
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_excel(writer, sheet_name='University Summary', index=False)
+            
+            # Add a Holidays/Calendar sheet placeholder
+            holidays_df = pd.DataFrame({
+                'Date': ['2026-01-01', '2026-01-26', '2026-03-25', '2026-04-10'],
+                'Occasion': ['New Year', 'Republic Day', 'Holi', 'Good Friday'],
+                'Status': ['Public Holiday', 'Academic Holiday', 'Restricted Holiday', 'Public Holiday']
+            })
+            holidays_df.to_excel(writer, sheet_name='Academic Calendar', index=False)
+
+        print(f"Advanced Academic Timetable generated: {output_path}")
 
     except Exception as e:
-        print(f"Error processing file: {str(e)}", file=sys.stderr)
+        print(f"Academic processing error: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python process_timetable.py <input_file> <output_file>")
         sys.exit(1)
-        
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
-    
-    process_timetable(input_file, output_file)
+    process_timetable(sys.argv[1], sys.argv[2])
